@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>UCAN Reality Lab Enterprise</title>
+  <style>
+    :root{font-family:Inter,system-ui,sans-serif;color:#13221d;background:#eef5f2}*{box-sizing:border-box}body{margin:0}header{background:#073f32;color:white;padding:1.25rem 2rem}main{max-width:1120px;margin:auto;padding:2rem}.grid{display:grid;grid-template-columns:360px 1fr;gap:1.5rem}.card{background:white;border:1px solid #d6e4de;border-radius:16px;padding:1.25rem;box-shadow:0 8px 24px #0b3f3220}label{display:block;font-weight:700;margin-top:1rem}input,textarea,select{width:100%;margin-top:.4rem;padding:.75rem;border:1px solid #9cb9ae;border-radius:10px;font:inherit}button{margin-top:1rem;border:0;border-radius:10px;padding:.8rem 1rem;background:#08775d;color:white;font-weight:800;cursor:pointer}button:focus,input:focus,textarea:focus,select:focus{outline:3px solid #f6c84c;outline-offset:2px}.project{border-bottom:1px solid #dde8e3;padding:1rem 0}.muted{color:#52675f}.status{display:inline-block;background:#e5f4ee;color:#075e49;padding:.25rem .55rem;border-radius:999px;font-size:.8rem}.error{color:#9c1c1c}.empty{padding:2rem;text-align:center;color:#52675f}@media(max-width:800px){.grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<header><h1>UCAN Reality Lab Enterprise</h1><p>Fase 1 · Gestión de proyectos</p></header>
+<main>
+  <section class="grid" aria-label="Panel de proyectos">
+    <form id="projectForm" class="card">
+      <h2>Nuevo proyecto</h2>
+      <label for="title">Título</label><input id="title" required minlength="3" maxlength="160">
+      <label for="course">Curso</label><input id="course" maxlength="120">
+      <label for="level">Nivel académico</label><select id="level"><option>Subgraduado</option><option>Maestría</option><option>Doctorado</option><option>Educación continua</option></select>
+      <label for="description">Descripción</label><textarea id="description" rows="6" maxlength="2000"></textarea>
+      <button type="submit">Crear proyecto</button>
+      <p id="formMessage" role="status" aria-live="polite"></p>
+    </form>
+    <section class="card">
+      <h2>Mis proyectos</h2>
+      <div id="projects" class="empty">Cargando proyectos…</div>
+    </section>
+  </section>
+</main>
+<script>
+const API='/api';
+const list=document.querySelector('#projects');
+const message=document.querySelector('#formMessage');
+function escapeHtml(value=''){return value.replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
+async function loadProjects(){
+  try{
+    const response=await fetch(`${API}/projects`); if(!response.ok) throw new Error('No fue posible cargar los proyectos.');
+    const projects=await response.json();
+    if(!projects.length){list.className='empty';list.textContent='Todavía no hay proyectos. Cree el primero.';return;}
+    list.className='';
+    list.innerHTML=projects.map(p=>`<article class="project"><span class="status">${escapeHtml(p.status)}</span><h3>${escapeHtml(p.title)}</h3><p>${escapeHtml(p.description||'Sin descripción')}</p><p class="muted">${escapeHtml(p.course||'Curso no especificado')} · ${escapeHtml(p.academic_level)} · versión ${p.version}</p></article>`).join('');
+  }catch(error){list.className='error';list.textContent=error.message;}
+}
+document.querySelector('#projectForm').addEventListener('submit',async event=>{
+  event.preventDefault(); message.textContent='Creando proyecto…';
+  const payload={title:title.value,course:course.value,academic_level:level.value,description:description.value};
+  try{
+    const response=await fetch(`${API}/projects`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    if(!response.ok){const detail=await response.json();throw new Error(detail.detail||'No fue posible crear el proyecto.');}
+    event.target.reset();message.textContent='Proyecto creado correctamente.';await loadProjects();
+  }catch(error){message.className='error';message.textContent=error.message;}
+});
+loadProjects();
+</script>
+</body>
+</html>
