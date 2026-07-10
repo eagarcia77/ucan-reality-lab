@@ -2,37 +2,53 @@ from __future__ import annotations
 
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, Response
+import jwt
+from fastapi import Depends, FastAPI, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi.security import OAuth2PasswordBearer
+from pwdlib import PasswordHash
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .database import Base, engine, get_db
-from .models import ProjectModel
+from .models import ProjectModel, UserModel
 
-APP_VERSION = "7.0.0-phase1.1"
+APP_VERSION = "7.0.0-phase1.2"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./ucan_enterprise.db")
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+JWT_SECRET = os.getenv("JWT_SECRET", "change-this-development-secret")
+JWT_ALGORITHM = "HS256"
+ACCESS_TOKEN_MINUTES = int(os.getenv("ACCESS_TOKEN_MINUTES", "480"))
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@ucan.local").lower().strip()
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "ChangeMe123!")
+
+password_hash = PasswordHash.recommended()
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+ALLOWED_ROLES = {"admin", "professor", "reviewer"}
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
+    with Session(engine) as db:
+        existing = db.scalar(select(UserModel).where(UserModel.email == ADMIN_EMAIL))
+        if not existing:
+            db.add(UserModel(email=ADMIN_EMAIL, full_name="Administrador UCAN", password_hash=password_hash.hash(ADMIN_PASSWORD), role="admin"))
+            db.commit()
     yield
 
 
 app = FastAPI(
     title="UCAN Reality Lab Enterprise API",
     version=APP_VERSION,
-    description="API persistente para gestión de proyectos de UCAN Reality Lab Enterprise.",
+    description="API persistente con autenticación y roles para UCAN Reality Lab Enterprise.",
     lifespan=lifespan,
 )
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:8170").split(",")],
@@ -40,6 +56,34 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    full_name: str = Field(min_length=3, max_length=160)
+    password: str = Field(min_length=8, max_length=128)
+    role: str = Field(default="professor", pattern="^(admin|professor|reviewer)$")
+
+
+class User(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    email: EmailStr
+    full_name: str
+    role: str
+    is_active: bool
+    created_at: datetime
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: User
 
 
 class ProjectCreate(BaseModel):
@@ -59,8 +103,8 @@ class ProjectUpdate(BaseModel):
 
 class Project(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-
     id: UUID
+    owner_id: UUID
     title: str
     course: str
     description: str
@@ -75,42 +119,92 @@ def clean(value: str) -> str:
     return " ".join(value.split())
 
 
+def create_access_token(user: UserModel) -> str:
+    now = datetime.now(timezone.utc)
+    return jwt.encode({"sub": user.id, "role": user.role, "email": user.email, "iat": now, "exp": now + timedelta(minutes=ACCESS_TOKEN_MINUTES)}, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> UserModel:
+    credentials_error = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sesión inválida o expirada", headers={"WWW-Authenticate": "Bearer"})
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        user_id = payload.get("sub")
+        if not user_id:
+            raise credentials_error
+    except jwt.PyJWTError as exc:
+        raise credentials_error from exc
+    user = db.get(UserModel, user_id)
+    if not user or not user.is_active:
+        raise credentials_error
+    return user
+
+
+def require_roles(*roles: str):
+    def dependency(user: UserModel = Depends(current_user)) -> UserModel:
+        if user.role not in roles:
+            raise HTTPException(status_code=403, detail="No tiene permisos para realizar esta acción")
+        return user
+    return dependency
+
+
+def accessible_project(db: Session, project_id: UUID, user: UserModel) -> ProjectModel:
+    project = db.get(ProjectModel, str(project_id))
+    if not project or (user.role != "admin" and project.owner_id != user.id):
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    return project
+
+
 @app.get("/api/health")
 def health(db: Session = Depends(get_db)) -> dict:
-    database_ok = False
-    database_error = None
     try:
         db.execute(text("SELECT 1"))
-        database_ok = True
+        database_ok, database_error = True, None
     except SQLAlchemyError as exc:
-        database_error = str(exc)
+        database_ok, database_error = False, str(exc)
+    return {"ok": database_ok, "service": "ucan-reality-lab-enterprise-api", "version": APP_VERSION, "database": "connected" if database_ok else "unavailable", "database_error": database_error, "redis_url_configured": bool(REDIS_URL), "phase": 1, "increment": "authentication-and-roles"}
 
-    return {
-        "ok": database_ok,
-        "service": "ucan-reality-lab-enterprise-api",
-        "version": APP_VERSION,
-        "database": "connected" if database_ok else "unavailable",
-        "database_error": database_error,
-        "redis_url_configured": bool(REDIS_URL),
-        "phase": 1,
-        "increment": "persistence",
-    }
+
+@app.post("/api/auth/login", response_model=TokenResponse)
+def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
+    user = db.scalar(select(UserModel).where(UserModel.email == payload.email.lower().strip()))
+    if not user or not password_hash.verify(payload.password, user.password_hash) or not user.is_active:
+        raise HTTPException(status_code=401, detail="Correo electrónico o contraseña incorrectos")
+    return TokenResponse(access_token=create_access_token(user), user=User.model_validate(user))
+
+
+@app.get("/api/auth/me", response_model=User)
+def me(user: UserModel = Depends(current_user)) -> UserModel:
+    return user
+
+
+@app.get("/api/users", response_model=list[User])
+def list_users(_: UserModel = Depends(require_roles("admin")), db: Session = Depends(get_db)) -> list[UserModel]:
+    return list(db.scalars(select(UserModel).order_by(UserModel.created_at.desc())).all())
+
+
+@app.post("/api/users", response_model=User, status_code=201)
+def create_user(payload: UserCreate, _: UserModel = Depends(require_roles("admin")), db: Session = Depends(get_db)) -> UserModel:
+    email = payload.email.lower().strip()
+    if db.scalar(select(UserModel).where(UserModel.email == email)):
+        raise HTTPException(status_code=409, detail="Ya existe un usuario con ese correo electrónico")
+    user = UserModel(email=email, full_name=clean(payload.full_name), password_hash=password_hash.hash(payload.password), role=payload.role)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 @app.get("/api/projects", response_model=list[Project])
-def list_projects(db: Session = Depends(get_db)) -> list[ProjectModel]:
+def list_projects(user: UserModel = Depends(current_user), db: Session = Depends(get_db)) -> list[ProjectModel]:
     statement = select(ProjectModel).order_by(ProjectModel.updated_at.desc())
+    if user.role != "admin":
+        statement = statement.where(ProjectModel.owner_id == user.id)
     return list(db.scalars(statement).all())
 
 
 @app.post("/api/projects", response_model=Project, status_code=201)
-def create_project(payload: ProjectCreate, db: Session = Depends(get_db)) -> ProjectModel:
-    project = ProjectModel(
-        title=clean(payload.title),
-        course=clean(payload.course),
-        description=payload.description.strip(),
-        academic_level=clean(payload.academic_level),
-    )
+def create_project(payload: ProjectCreate, user: UserModel = Depends(require_roles("admin", "professor")), db: Session = Depends(get_db)) -> ProjectModel:
+    project = ProjectModel(owner_id=user.id, title=clean(payload.title), course=clean(payload.course), description=payload.description.strip(), academic_level=clean(payload.academic_level))
     db.add(project)
     db.commit()
     db.refresh(project)
@@ -118,25 +212,20 @@ def create_project(payload: ProjectCreate, db: Session = Depends(get_db)) -> Pro
 
 
 @app.get("/api/projects/{project_id}", response_model=Project)
-def get_project(project_id: UUID, db: Session = Depends(get_db)) -> ProjectModel:
-    project = db.get(ProjectModel, str(project_id))
-    if not project:
-        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
-    return project
+def get_project(project_id: UUID, user: UserModel = Depends(current_user), db: Session = Depends(get_db)) -> ProjectModel:
+    return accessible_project(db, project_id, user)
 
 
 @app.patch("/api/projects/{project_id}", response_model=Project)
-def update_project(project_id: UUID, payload: ProjectUpdate, db: Session = Depends(get_db)) -> ProjectModel:
-    project = db.get(ProjectModel, str(project_id))
-    if not project:
-        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
-
+def update_project(project_id: UUID, payload: ProjectUpdate, user: UserModel = Depends(require_roles("admin", "professor", "reviewer")), db: Session = Depends(get_db)) -> ProjectModel:
+    project = accessible_project(db, project_id, user)
     changes = payload.model_dump(exclude_unset=True)
+    if user.role == "reviewer" and set(changes) - {"status"}:
+        raise HTTPException(status_code=403, detail="El revisor solo puede actualizar el estado")
     for key, value in changes.items():
         if isinstance(value, str):
             value = clean(value) if key != "description" else value.strip()
         setattr(project, key, value)
-
     project.updated_at = datetime.now(timezone.utc)
     project.version += 1
     db.commit()
@@ -145,10 +234,8 @@ def update_project(project_id: UUID, payload: ProjectUpdate, db: Session = Depen
 
 
 @app.delete("/api/projects/{project_id}", status_code=204)
-def delete_project(project_id: UUID, db: Session = Depends(get_db)) -> Response:
-    project = db.get(ProjectModel, str(project_id))
-    if not project:
-        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+def delete_project(project_id: UUID, user: UserModel = Depends(require_roles("admin", "professor")), db: Session = Depends(get_db)) -> Response:
+    project = accessible_project(db, project_id, user)
     db.delete(project)
     db.commit()
     return Response(status_code=204)
