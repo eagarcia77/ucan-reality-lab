@@ -1,21 +1,36 @@
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from uuid import UUID, uuid4
+from uuid import UUID
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select, text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
-APP_VERSION = "7.0.0-phase1"
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://ucan:ucan@db:5432/ucan")
+from .database import Base, engine, get_db
+from .models import ProjectModel
+
+APP_VERSION = "7.0.0-phase1.1"
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./ucan_enterprise.db")
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    Base.metadata.create_all(bind=engine)
+    yield
+
 
 app = FastAPI(
     title="UCAN Reality Lab Enterprise API",
     version=APP_VERSION,
-    description="API inicial para gestión de proyectos de UCAN Reality Lab Enterprise.",
+    description="API persistente para gestión de proyectos de UCAN Reality Lab Enterprise.",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -43,6 +58,8 @@ class ProjectUpdate(BaseModel):
 
 
 class Project(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     title: str
     course: str
@@ -54,78 +71,84 @@ class Project(BaseModel):
     version: int
 
 
-# Repositorio temporal para validar el flujo de la Fase 1.
-# En el siguiente incremento se sustituirá por PostgreSQL/SQLAlchemy.
-PROJECTS: dict[UUID, Project] = {}
+def clean(value: str) -> str:
+    return " ".join(value.split())
 
 
 @app.get("/api/health")
-def health() -> dict:
+def health(db: Session = Depends(get_db)) -> dict:
+    database_ok = False
+    database_error = None
+    try:
+        db.execute(text("SELECT 1"))
+        database_ok = True
+    except SQLAlchemyError as exc:
+        database_error = str(exc)
+
     return {
-        "ok": True,
+        "ok": database_ok,
         "service": "ucan-reality-lab-enterprise-api",
         "version": APP_VERSION,
-        "database_url_configured": bool(DATABASE_URL),
+        "database": "connected" if database_ok else "unavailable",
+        "database_error": database_error,
         "redis_url_configured": bool(REDIS_URL),
         "phase": 1,
+        "increment": "persistence",
     }
 
 
 @app.get("/api/projects", response_model=list[Project])
-def list_projects() -> list[Project]:
-    return sorted(PROJECTS.values(), key=lambda project: project.updated_at, reverse=True)
+def list_projects(db: Session = Depends(get_db)) -> list[ProjectModel]:
+    statement = select(ProjectModel).order_by(ProjectModel.updated_at.desc())
+    return list(db.scalars(statement).all())
 
 
 @app.post("/api/projects", response_model=Project, status_code=201)
-def create_project(payload: ProjectCreate) -> Project:
-    now = datetime.now(timezone.utc)
-    project = Project(
-        id=uuid4(),
-        title=payload.title.strip(),
-        course=payload.course.strip(),
+def create_project(payload: ProjectCreate, db: Session = Depends(get_db)) -> ProjectModel:
+    project = ProjectModel(
+        title=clean(payload.title),
+        course=clean(payload.course),
         description=payload.description.strip(),
-        academic_level=payload.academic_level.strip(),
-        status="draft",
-        created_at=now,
-        updated_at=now,
-        version=1,
+        academic_level=clean(payload.academic_level),
     )
-    PROJECTS[project.id] = project
+    db.add(project)
+    db.commit()
+    db.refresh(project)
     return project
 
 
 @app.get("/api/projects/{project_id}", response_model=Project)
-def get_project(project_id: UUID) -> Project:
-    project = PROJECTS.get(project_id)
+def get_project(project_id: UUID, db: Session = Depends(get_db)) -> ProjectModel:
+    project = db.get(ProjectModel, str(project_id))
     if not project:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     return project
 
 
 @app.patch("/api/projects/{project_id}", response_model=Project)
-def update_project(project_id: UUID, payload: ProjectUpdate) -> Project:
-    current = PROJECTS.get(project_id)
-    if not current:
+def update_project(project_id: UUID, payload: ProjectUpdate, db: Session = Depends(get_db)) -> ProjectModel:
+    project = db.get(ProjectModel, str(project_id))
+    if not project:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
 
     changes = payload.model_dump(exclude_unset=True)
     for key, value in changes.items():
         if isinstance(value, str):
-            changes[key] = value.strip()
+            value = clean(value) if key != "description" else value.strip()
+        setattr(project, key, value)
 
-    updated = current.model_copy(
-        update={
-            **changes,
-            "updated_at": datetime.now(timezone.utc),
-            "version": current.version + 1,
-        }
-    )
-    PROJECTS[project_id] = updated
-    return updated
+    project.updated_at = datetime.now(timezone.utc)
+    project.version += 1
+    db.commit()
+    db.refresh(project)
+    return project
 
 
 @app.delete("/api/projects/{project_id}", status_code=204)
-def delete_project(project_id: UUID) -> None:
-    if project_id not in PROJECTS:
+def delete_project(project_id: UUID, db: Session = Depends(get_db)) -> Response:
+    project = db.get(ProjectModel, str(project_id))
+    if not project:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
-    del PROJECTS[project_id]
+    db.delete(project)
+    db.commit()
+    return Response(status_code=204)
