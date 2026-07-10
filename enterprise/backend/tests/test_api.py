@@ -5,21 +5,42 @@ TEST_DB = Path("./test_ucan_enterprise.db")
 if TEST_DB.exists():
     TEST_DB.unlink()
 os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB}"
+os.environ["JWT_SECRET"] = "test-secret-key-for-automated-tests"
+os.environ["ADMIN_EMAIL"] = "admin@test.local"
+os.environ["ADMIN_PASSWORD"] = "TestPassword123!"
 
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.main import app  # noqa: E402
 
 
-def test_health_and_persistent_project_lifecycle() -> None:
+def login(client: TestClient, email: str, password: str) -> dict[str, str]:
+    response = client.post("/api/auth/login", json={"email": email, "password": password})
+    assert response.status_code == 200
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+def test_auth_roles_and_persistent_project_lifecycle() -> None:
     with TestClient(app) as client:
         health = client.get("/api/health")
         assert health.status_code == 200
         assert health.json()["ok"] is True
-        assert health.json()["database"] == "connected"
+        assert health.json()["increment"] == "authentication-and-roles"
+
+        assert client.get("/api/projects").status_code == 401
+        admin_headers = login(client, "admin@test.local", "TestPassword123!")
+
+        professor = client.post(
+            "/api/users",
+            headers=admin_headers,
+            json={"email": "professor@test.local", "full_name": "Profesora Prueba", "password": "Professor123!", "role": "professor"},
+        )
+        assert professor.status_code == 201
+        professor_headers = login(client, "professor@test.local", "Professor123!")
 
         created = client.post(
             "/api/projects",
+            headers=professor_headers,
             json={
                 "title": "Actividad de anatomía",
                 "course": "BIOL 1101",
@@ -32,26 +53,22 @@ def test_health_and_persistent_project_lifecycle() -> None:
         project_id = project["id"]
         assert project["status"] == "draft"
         assert project["version"] == 1
+        assert project["owner_id"] == professor.json()["id"]
 
         updated = client.patch(
             f"/api/projects/{project_id}",
+            headers=professor_headers,
             json={"status": "in_review", "title": "Actividad de anatomía revisada"},
         )
         assert updated.status_code == 200
         assert updated.json()["version"] == 2
-        assert updated.json()["status"] == "in_review"
 
-        fetched = client.get(f"/api/projects/{project_id}")
-        assert fetched.status_code == 200
-        assert fetched.json()["title"] == "Actividad de anatomía revisada"
+        assert client.get(f"/api/projects/{project_id}", headers=professor_headers).status_code == 200
+        assert any(item["id"] == project_id for item in client.get("/api/projects", headers=admin_headers).json())
 
-        listed = client.get("/api/projects")
-        assert listed.status_code == 200
-        assert any(item["id"] == project_id for item in listed.json())
-
-        deleted = client.delete(f"/api/projects/{project_id}")
+        deleted = client.delete(f"/api/projects/{project_id}", headers=professor_headers)
         assert deleted.status_code == 204
-        assert client.get(f"/api/projects/{project_id}").status_code == 404
+        assert client.get(f"/api/projects/{project_id}", headers=professor_headers).status_code == 404
 
     if TEST_DB.exists():
         TEST_DB.unlink()
