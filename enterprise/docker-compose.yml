@@ -14,6 +14,10 @@ services:
       DATABASE_URL: postgresql+psycopg://ucan:${POSTGRES_PASSWORD:-ucan_dev_password}@db:5432/ucan
       REDIS_URL: redis://redis:6379/0
       CORS_ORIGINS: http://localhost:${UCAN_ENTERPRISE_PORT:-8170}
+      JWT_SECRET: ${JWT_SECRET}
+      ACCESS_TOKEN_MINUTES: ${ACCESS_TOKEN_MINUTES:-480}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
     depends_on:
       db:
         condition: service_healthy
