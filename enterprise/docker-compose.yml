@@ -11,7 +11,7 @@ services:
   backend:
     build: ./backend
     environment:
-      DATABASE_URL: postgresql://ucan:${POSTGRES_PASSWORD:-ucan_dev_password}@db:5432/ucan
+      DATABASE_URL: postgresql+psycopg://ucan:${POSTGRES_PASSWORD:-ucan_dev_password}@db:5432/ucan
       REDIS_URL: redis://redis:6379/0
       CORS_ORIGINS: http://localhost:${UCAN_ENTERPRISE_PORT:-8170}
     depends_on:
@@ -19,6 +19,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
     restart: unless-stopped
 
   db:
