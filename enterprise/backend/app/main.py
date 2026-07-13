@@ -15,12 +15,12 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from .database import Base, engine, get_db
+from .cloud import masked_database_target, wait_for_database
+from .database import Base, DATABASE_URL, engine, get_db
 from .models import ProjectModel, UserModel
 
-APP_VERSION = "7.0.0-phase1.2"
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./ucan_enterprise.db")
-REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+APP_VERSION = "7.1.0-cloud-ready"
+REDIS_URL = os.getenv("REDIS_URL", "")
 JWT_SECRET = os.getenv("JWT_SECRET", "change-this-development-secret")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_MINUTES = int(os.getenv("ACCESS_TOKEN_MINUTES", "480"))
@@ -34,11 +34,19 @@ ALLOWED_ROLES = {"admin", "professor", "reviewer"}
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    wait_for_database(engine)
     Base.metadata.create_all(bind=engine)
     with Session(engine) as db:
         existing = db.scalar(select(UserModel).where(UserModel.email == ADMIN_EMAIL))
         if not existing:
-            db.add(UserModel(email=ADMIN_EMAIL, full_name="Administrador UCAN", password_hash=password_hash.hash(ADMIN_PASSWORD), role="admin"))
+            db.add(
+                UserModel(
+                    email=ADMIN_EMAIL,
+                    full_name="Administrador UCAN",
+                    password_hash=password_hash.hash(ADMIN_PASSWORD),
+                    role="admin",
+                )
+            )
             db.commit()
     yield
 
@@ -46,12 +54,12 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="UCAN Reality Lab Enterprise API",
     version=APP_VERSION,
-    description="API persistente con autenticación y roles para UCAN Reality Lab Enterprise.",
+    description="API persistente, autenticada y preparada para despliegue en la nube.",
     lifespan=lifespan,
 )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:8170").split(",")],
+    allow_origins=[origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:8170").split(",") if origin.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -121,11 +129,25 @@ def clean(value: str) -> str:
 
 def create_access_token(user: UserModel) -> str:
     now = datetime.now(timezone.utc)
-    return jwt.encode({"sub": user.id, "role": user.role, "email": user.email, "iat": now, "exp": now + timedelta(minutes=ACCESS_TOKEN_MINUTES)}, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return jwt.encode(
+        {
+            "sub": user.id,
+            "role": user.role,
+            "email": user.email,
+            "iat": now,
+            "exp": now + timedelta(minutes=ACCESS_TOKEN_MINUTES),
+        },
+        JWT_SECRET,
+        algorithm=JWT_ALGORITHM,
+    )
 
 
 def current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> UserModel:
-    credentials_error = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sesión inválida o expirada", headers={"WWW-Authenticate": "Bearer"})
+    credentials_error = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Sesión inválida o expirada",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         user_id = payload.get("sub")
@@ -160,8 +182,19 @@ def health(db: Session = Depends(get_db)) -> dict:
         db.execute(text("SELECT 1"))
         database_ok, database_error = True, None
     except SQLAlchemyError as exc:
-        database_ok, database_error = False, str(exc)
-    return {"ok": database_ok, "service": "ucan-reality-lab-enterprise-api", "version": APP_VERSION, "database": "connected" if database_ok else "unavailable", "database_error": database_error, "redis_url_configured": bool(REDIS_URL), "phase": 1, "increment": "authentication-and-roles"}
+        database_ok, database_error = False, exc.__class__.__name__
+    return {
+        "ok": database_ok,
+        "service": "ucan-reality-lab-enterprise-api",
+        "version": APP_VERSION,
+        "database": "connected" if database_ok else "unavailable",
+        "database_target": masked_database_target(DATABASE_URL),
+        "database_error": database_error,
+        "redis_url_configured": bool(REDIS_URL),
+        "port": int(os.getenv("PORT", "8000")),
+        "phase": 1,
+        "increment": "cloud-ready",
+    }
 
 
 @app.post("/api/auth/login", response_model=TokenResponse)
@@ -187,7 +220,12 @@ def create_user(payload: UserCreate, _: UserModel = Depends(require_roles("admin
     email = payload.email.lower().strip()
     if db.scalar(select(UserModel).where(UserModel.email == email)):
         raise HTTPException(status_code=409, detail="Ya existe un usuario con ese correo electrónico")
-    user = UserModel(email=email, full_name=clean(payload.full_name), password_hash=password_hash.hash(payload.password), role=payload.role)
+    user = UserModel(
+        email=email,
+        full_name=clean(payload.full_name),
+        password_hash=password_hash.hash(payload.password),
+        role=payload.role,
+    )
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -204,7 +242,13 @@ def list_projects(user: UserModel = Depends(current_user), db: Session = Depends
 
 @app.post("/api/projects", response_model=Project, status_code=201)
 def create_project(payload: ProjectCreate, user: UserModel = Depends(require_roles("admin", "professor")), db: Session = Depends(get_db)) -> ProjectModel:
-    project = ProjectModel(owner_id=user.id, title=clean(payload.title), course=clean(payload.course), description=payload.description.strip(), academic_level=clean(payload.academic_level))
+    project = ProjectModel(
+        owner_id=user.id,
+        title=clean(payload.title),
+        course=clean(payload.course),
+        description=payload.description.strip(),
+        academic_level=clean(payload.academic_level),
+    )
     db.add(project)
     db.commit()
     db.refresh(project)
