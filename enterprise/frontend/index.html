@@ -15,8 +15,8 @@
     <h2>Iniciar sesión</h2>
     <p class="muted">Acceda con su cuenta institucional para administrar proyectos.</p>
     <form id="loginForm">
-      <label for="email">Correo electrónico</label><input id="email" type="email" value="admin@ucan.local" required autocomplete="username">
-      <label for="password">Contraseña</label><input id="password" type="password" value="ChangeMe123!" required minlength="8" autocomplete="current-password">
+      <label for="email">Correo electrónico</label><input id="email" type="email" required autocomplete="username">
+      <label for="password">Contraseña</label><input id="password" type="password" required minlength="8" autocomplete="current-password">
       <button type="submit">Entrar</button>
       <p id="loginMessage" role="status" aria-live="polite"></p>
     </form>
@@ -39,7 +39,9 @@
   </section>
 </main>
 <script>
-const API='/api';
+const API = window.location.hostname.endsWith('onrender.com')
+  ? 'https://ucan-reality-lab.onrender.com/api'
+  : '/api';
 let token=localStorage.getItem('ucan_access_token')||'';
 let currentUser=null;
 const list=document.querySelector('#projects');
