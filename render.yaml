@@ -30,12 +30,11 @@ services:
       - key: DB_CONNECT_DELAY_SECONDS
         value: "5"
 
+  - type: keyvalue
+    name: ucan-reality-lab-redis
+    ipAllowList: []
+
 databases:
   - name: ucan-reality-lab-db
     databaseName: ucan
     user: ucan
-
-services:
-  - type: keyvalue
-    name: ucan-reality-lab-redis
-    ipAllowList: []
