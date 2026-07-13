@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: ucan-reality-lab-api
+    runtime: docker
+    branch: enterprise-v7-auth-roles
+    rootDir: enterprise/backend
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ucan-reality-lab-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: ucan-reality-lab-redis
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ACCESS_TOKEN_MINUTES
+        value: "480"
+      - key: DB_CONNECT_ATTEMPTS
+        value: "18"
+      - key: DB_CONNECT_DELAY_SECONDS
+        value: "5"
+
+databases:
+  - name: ucan-reality-lab-db
+    databaseName: ucan
+    user: ucan
+
+services:
+  - type: keyvalue
+    name: ucan-reality-lab-redis
+    ipAllowList: []
