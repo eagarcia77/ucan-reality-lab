@@ -2,11 +2,12 @@
   const $ = id => document.getElementById(id);
   const API = location.hostname.endsWith('onrender.com') ? 'https://ucan-reality-lab.onrender.com/api' : '/api';
   let token = localStorage.getItem('ucan_access_token') || '';
+  let currentUser = null;
   const headers = (extra = {}) => ({ ...extra, Authorization: `Bearer ${token}` });
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   function showPanel(name) { ['loginPanel','registerPanel','forgotPanel'].forEach(id => $(id).classList.toggle('hidden', id !== name)); }
-  function showLogin(message = '') { token=''; localStorage.removeItem('ucan_access_token'); $('authView').classList.remove('hidden'); $('dashboardView').classList.add('hidden'); $('sessionArea').classList.add('hidden'); showPanel('loginPanel'); $('loginMessage').textContent=message; }
-  function showDashboard(user) { $('authView').classList.add('hidden'); $('dashboardView').classList.remove('hidden'); $('sessionArea').classList.remove('hidden'); $('userBadge').textContent=`${user.full_name} · ${user.role}`; $('projectForm').classList.toggle('hidden',user.role==='reviewer'); let a=document.getElementById('adminUsersLink'); if(user.role==='admin'&&!a){a=document.createElement('a');a.id='adminUsersLink';a.className='btn secondary';a.href='/admin-users.html';a.textContent='Administrar cuentas';$('sessionArea').insertBefore(a,$('logoutButton'));} if(a)a.classList.toggle('hidden',user.role!=='admin'); }
+  function showLogin(message = '') { token=''; currentUser=null; localStorage.removeItem('ucan_access_token'); $('authView').classList.remove('hidden'); $('dashboardView').classList.add('hidden'); $('sessionArea').classList.add('hidden'); showPanel('loginPanel'); $('loginMessage').textContent=message; }
+  function showDashboard(user) { currentUser=user; $('authView').classList.add('hidden'); $('dashboardView').classList.remove('hidden'); $('sessionArea').classList.remove('hidden'); $('userBadge').textContent=`${user.full_name} · ${user.role}`; $('projectForm').classList.toggle('hidden',user.role==='reviewer'); const heading=$('projectsHeading'); if(heading)heading.textContent=user.role==='admin'?'Todos los proyectos':'Mis proyectos'; let a=document.getElementById('adminUsersLink'); if(user.role==='admin'&&!a){a=document.createElement('a');a.id='adminUsersLink';a.className='btn secondary';a.href='/admin-users.html';a.textContent='Administrar cuentas';$('sessionArea').insertBefore(a,$('logoutButton'));} if(a)a.classList.toggle('hidden',user.role!=='admin'); }
   async function json(response){const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.detail||`Error ${response.status}`);return body;}
   async function deleteProject(projectId, projectTitle, button){
     const confirmed = window.confirm(`¿Desea borrar permanentemente el proyecto “${projectTitle}”?\n\nTambién se eliminarán la actividad, la rúbrica y la configuración guardada. Esta acción no se puede deshacer.`);
@@ -28,9 +29,15 @@
   async function loadProjects(){
     $('projects').textContent='Cargando proyectos…';
     try{
-      const ps=await json(await fetch(`${API}/projects`,{headers:headers()}));
+      const endpoint=currentUser?.role==='admin'?`${API}/admin/projects`:`${API}/projects`;
+      const ps=await json(await fetch(endpoint,{headers:headers()}));
       if(!ps.length){$('projects').innerHTML='<p class="muted">Todavía no hay proyectos.</p>';return}
-      $('projects').innerHTML=ps.map(p=>`<article class="project" data-project-id="${esc(p.id)}"><h3>${esc(p.title)}</h3><p>${esc(p.description||'Sin descripción')}</p><p class="muted">${esc(p.course||'Curso no especificado')} · ${esc(p.academic_level)} · versión ${p.version}</p><div><a class="btn" href="/authoring-v8.html?project=${encodeURIComponent(p.id)}&title=${encodeURIComponent(p.title)}&course=${encodeURIComponent(p.course||'')}&level=${encodeURIComponent(p.academic_level||'')}">Abrir Studio v8.1 LTS</a><button type="button" class="secondary delete-project" data-project-id="${esc(p.id)}" data-project-title="${esc(p.title)}">Borrar proyecto</button></div></article>`).join('');
+      $('projects').innerHTML=ps.map(p=>{
+        const ownerName=p.owner_name||currentUser?.full_name||'Usuario';
+        const ownerEmail=p.owner_email||currentUser?.email||'';
+        const ownerLine=`<p class="project-owner"><strong>Creado por:</strong> ${esc(ownerName)}${ownerEmail?` · ${esc(ownerEmail)}`:''}</p>`;
+        return `<article class="project" data-project-id="${esc(p.id)}"><h3>${esc(p.title)}</h3>${ownerLine}<p>${esc(p.description||'Sin descripción')}</p><p class="muted">${esc(p.course||'Curso no especificado')} · ${esc(p.academic_level)} · versión ${p.version}</p><div><a class="btn" href="/authoring-v8.html?project=${encodeURIComponent(p.id)}&title=${encodeURIComponent(p.title)}&course=${encodeURIComponent(p.course||'')}&level=${encodeURIComponent(p.academic_level||'')}">Abrir Studio v8.1 LTS</a><button type="button" class="secondary delete-project" data-project-id="${esc(p.id)}" data-project-title="${esc(p.title)}">Borrar proyecto</button></div></article>`;
+      }).join('');
       document.querySelectorAll('.delete-project').forEach(button=>{
         button.addEventListener('click',()=>deleteProject(button.dataset.projectId,button.dataset.projectTitle,button));
       });
