@@ -19,16 +19,17 @@ from .cloud import masked_database_target, wait_for_database
 from .database import Base, DATABASE_URL, engine, get_db
 from .models import ProjectModel, UserModel
 
-APP_VERSION = "7.2.1-university-registration"
+APP_VERSION = "8.0.0-lts"
 REDIS_URL = os.getenv("REDIS_URL", "")
 JWT_SECRET = os.getenv("JWT_SECRET", "change-this-development-secret")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_MINUTES = int(os.getenv("ACCESS_TOKEN_MINUTES", "480"))
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@ucan.local").lower().strip()
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "ChangeMe123!")
+ADMIN_SYNC_PASSWORD = os.getenv("ADMIN_SYNC_PASSWORD", "true").lower() in {"1", "true", "yes"}
 ALLOWED_EMAIL_DOMAINS = tuple(
     domain.strip().lower().lstrip("@")
-    for domain in os.getenv("ALLOWED_EMAIL_DOMAINS", "sangerman.inter.edu,inter.edu").split(",")
+    for domain in os.getenv("ALLOWED_EMAIL_DOMAINS", "intersg.edu").split(",")
     if domain.strip()
 )
 
@@ -44,22 +45,27 @@ async def lifespan(_: FastAPI):
     with Session(engine) as db:
         existing = db.scalar(select(UserModel).where(UserModel.email == ADMIN_EMAIL))
         if not existing:
-            db.add(
-                UserModel(
-                    email=ADMIN_EMAIL,
-                    full_name="Administrador UCAN",
-                    password_hash=password_hash.hash(ADMIN_PASSWORD),
-                    role="admin",
-                )
+            existing = UserModel(
+                email=ADMIN_EMAIL,
+                full_name="Administrador UCAN",
+                password_hash=password_hash.hash(ADMIN_PASSWORD),
+                role="admin",
+                is_active=True,
             )
-            db.commit()
+            db.add(existing)
+        else:
+            existing.role = "admin"
+            existing.is_active = True
+            if ADMIN_SYNC_PASSWORD:
+                existing.password_hash = password_hash.hash(ADMIN_PASSWORD)
+        db.commit()
     yield
 
 
 app = FastAPI(
     title="UCAN Reality Lab Enterprise API",
     version=APP_VERSION,
-    description="API persistente, autenticada y preparada para despliegue en la nube.",
+    description="API estable para autenticación, autoría con IA y publicación LMS.",
     lifespan=lifespan,
 )
 app.add_middleware(
@@ -157,44 +163,31 @@ def require_university_email(value: str) -> str:
     domain = email_domain(email)
     if domain not in ALLOWED_EMAIL_DOMAINS:
         allowed = ", ".join(f"@{item}" for item in ALLOWED_EMAIL_DOMAINS)
-        raise HTTPException(
-            status_code=422,
-            detail=f"Utilice un correo electrónico institucional autorizado: {allowed}",
-        )
+        raise HTTPException(status_code=422, detail=f"Utilice un correo institucional autorizado: {allowed}")
     return email
 
 
 def create_access_token(user: UserModel) -> str:
     now = datetime.now(timezone.utc)
     return jwt.encode(
-        {
-            "sub": user.id,
-            "role": user.role,
-            "email": user.email,
-            "iat": now,
-            "exp": now + timedelta(minutes=ACCESS_TOKEN_MINUTES),
-        },
+        {"sub": user.id, "role": user.role, "email": user.email, "iat": now, "exp": now + timedelta(minutes=ACCESS_TOKEN_MINUTES)},
         JWT_SECRET,
         algorithm=JWT_ALGORITHM,
     )
 
 
 def current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> UserModel:
-    credentials_error = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Sesión inválida o expirada",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+    error = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sesión inválida o expirada", headers={"WWW-Authenticate": "Bearer"})
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         user_id = payload.get("sub")
         if not user_id:
-            raise credentials_error
+            raise error
     except jwt.PyJWTError as exc:
-        raise credentials_error from exc
+        raise error from exc
     user = db.get(UserModel, user_id)
     if not user or not user.is_active:
-        raise credentials_error
+        raise error
     return user
 
 
@@ -231,8 +224,7 @@ def health(db: Session = Depends(get_db)) -> dict:
         "port": int(os.getenv("PORT", "8000")),
         "registration_enabled": True,
         "allowed_email_domains": list(ALLOWED_EMAIL_DOMAINS),
-        "phase": 1,
-        "increment": "university-email-registration",
+        "increment": "v8-lts-auth-and-authoring",
     }
 
 
@@ -245,14 +237,8 @@ def registration_config() -> RegistrationConfig:
 def register(payload: RegistrationRequest, db: Session = Depends(get_db)) -> TokenResponse:
     email = require_university_email(str(payload.email))
     if db.scalar(select(UserModel).where(UserModel.email == email)):
-        raise HTTPException(status_code=409, detail="Ya existe una cuenta con ese correo electrónico")
-    user = UserModel(
-        email=email,
-        full_name=clean(payload.full_name),
-        password_hash=password_hash.hash(payload.password),
-        role="professor",
-        is_active=True,
-    )
+        raise HTTPException(status_code=409, detail="Esta cuenta ya existe. Inicie sesión o utilice ‘Olvidé mi contraseña’.")
+    user = UserModel(email=email, full_name=clean(payload.full_name), password_hash=password_hash.hash(payload.password), role="professor", is_active=True)
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -262,8 +248,10 @@ def register(payload: RegistrationRequest, db: Session = Depends(get_db)) -> Tok
 @app.post("/api/auth/login", response_model=TokenResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
     user = db.scalar(select(UserModel).where(UserModel.email == normalized_email(str(payload.email))))
-    if not user or not password_hash.verify(payload.password, user.password_hash) or not user.is_active:
-        raise HTTPException(status_code=401, detail="Correo electrónico o contraseña incorrectos")
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="La cuenta no existe o está desactivada")
+    if not password_hash.verify(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="La contraseña es incorrecta. Use ‘Olvidé mi contraseña’ para restablecerla.")
     return TokenResponse(access_token=create_access_token(user), user=User.model_validate(user))
 
 
@@ -282,12 +270,7 @@ def create_user(payload: UserCreate, _: UserModel = Depends(require_roles("admin
     email = normalized_email(str(payload.email))
     if db.scalar(select(UserModel).where(UserModel.email == email)):
         raise HTTPException(status_code=409, detail="Ya existe un usuario con ese correo electrónico")
-    user = UserModel(
-        email=email,
-        full_name=clean(payload.full_name),
-        password_hash=password_hash.hash(payload.password),
-        role=payload.role,
-    )
+    user = UserModel(email=email, full_name=clean(payload.full_name), password_hash=password_hash.hash(payload.password), role=payload.role)
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -304,13 +287,7 @@ def list_projects(user: UserModel = Depends(current_user), db: Session = Depends
 
 @app.post("/api/projects", response_model=Project, status_code=201)
 def create_project(payload: ProjectCreate, user: UserModel = Depends(require_roles("admin", "professor")), db: Session = Depends(get_db)) -> ProjectModel:
-    project = ProjectModel(
-        owner_id=user.id,
-        title=clean(payload.title),
-        course=clean(payload.course),
-        description=payload.description.strip(),
-        academic_level=clean(payload.academic_level),
-    )
+    project = ProjectModel(owner_id=user.id, title=clean(payload.title), course=clean(payload.course), description=payload.description.strip(), academic_level=clean(payload.academic_level))
     db.add(project)
     db.commit()
     db.refresh(project)
