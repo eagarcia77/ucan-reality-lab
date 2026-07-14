@@ -38,3 +38,16 @@ class ProjectModel(Base):
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
 
     owner: Mapped[UserModel] = relationship(back_populates="projects")
+    authoring: Mapped["AuthoringWorkspaceModel | None"] = relationship(back_populates="project", cascade="all, delete-orphan", uselist=False)
+
+
+class AuthoringWorkspaceModel(Base):
+    __tablename__ = "authoring_workspaces"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
+    content_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    quality_score: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+
+    project: Mapped[ProjectModel] = relationship(back_populates="authoring")
