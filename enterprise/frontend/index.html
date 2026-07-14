@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>UCAN Reality Lab Enterprise</title>
+  <title>UCAN Reality Lab Enterprise v7.2 Cloud</title>
   <style>
     :root{font-family:Inter,system-ui,sans-serif;color:#13221d;background:#eef5f2}*{box-sizing:border-box}body{margin:0}header{background:#073f32;color:white;padding:1.25rem 2rem}.header-row{max-width:1120px;margin:auto;display:flex;justify-content:space-between;align-items:center;gap:1rem}main{max-width:1120px;margin:auto;padding:2rem}.grid{display:grid;grid-template-columns:360px 1fr;gap:1.5rem}.card{background:white;border:1px solid #d6e4de;border-radius:16px;padding:1.25rem;box-shadow:0 8px 24px #0b3f3220}label{display:block;font-weight:700;margin-top:1rem}input,textarea,select{width:100%;margin-top:.4rem;padding:.75rem;border:1px solid #9cb9ae;border-radius:10px;font:inherit}button{margin-top:1rem;border:0;border-radius:10px;padding:.8rem 1rem;background:#08775d;color:white;font-weight:800;cursor:pointer}.secondary{background:#dfece7;color:#075e49}.header-row button{margin:0;background:#fff;color:#075e49}button:focus,input:focus,textarea:focus,select:focus{outline:3px solid #f6c84c;outline-offset:2px}.project{border-bottom:1px solid #dde8e3;padding:1rem 0}.muted{color:#52675f}.status{display:inline-block;background:#e5f4ee;color:#075e49;padding:.25rem .55rem;border-radius:999px;font-size:.8rem}.error{color:#9c1c1c}.success{color:#086b52}.empty{padding:2rem;text-align:center;color:#52675f}.hidden{display:none!important}.login{max-width:460px;margin:3rem auto}.badge{font-size:.82rem;background:#e5f4ee;color:#075e49;border-radius:999px;padding:.25rem .55rem}@media(max-width:800px){.grid{grid-template-columns:1fr}.header-row{align-items:flex-start;flex-direction:column}}
   </style>
 </head>
 <body>
-<header><div class="header-row"><div><h1>UCAN Reality Lab Enterprise</h1><p>Fase 1 · Usuarios, roles y proyectos persistentes</p></div><div id="sessionArea" class="hidden"><span id="userBadge" class="badge"></span> <button id="logoutButton" type="button">Cerrar sesión</button></div></div></header>
+<header><div class="header-row"><div><h1>UCAN Reality Lab Enterprise v7.2 Cloud</h1><p>Acceso seguro, proyectos persistentes y despliegue preparado para la nube</p></div><div id="sessionArea" class="hidden"><span id="userBadge" class="badge"></span> <button id="logoutButton" type="button">Cerrar sesión</button></div></div></header>
 <main>
   <section id="loginView" class="card login">
     <h2>Iniciar sesión</h2>
@@ -61,7 +61,7 @@ function showDashboard(user){
 async function verifySession(){
   if(!token){showLogin();return;}
   try{const response=await fetch(`${API}/auth/me`,{headers:authHeaders()});if(!response.ok)throw new Error();const user=await response.json();showDashboard(user);await loadProjects();}
-  catch{showLogin('La sesión expiró. Inicie sesión nuevamente.');}
+  catch{showLogin('La sesión expiró o el servidor no está disponible. Inicie sesión nuevamente.');}
 }
 async function loadProjects(){
   list.className='empty';list.textContent='Cargando proyectos…';
