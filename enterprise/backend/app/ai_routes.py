@@ -7,7 +7,7 @@ import urllib.request
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .main import current_user
 from .models import UserModel
@@ -19,6 +19,8 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini").strip()
 
 
 class ImageActivityRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     image_url: str = Field(min_length=10, max_length=8_000_000)
     project_title: str = Field(default="Actividad educativa", max_length=160)
     course: str = Field(default="", max_length=120)
@@ -28,12 +30,16 @@ class ImageActivityRequest(BaseModel):
 
 
 class RubricCriterion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str
     points: int
     levels: str
 
 
 class ImageActivityResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     image_summary: str
     detected_concepts: list[str]
     activity_title: str
@@ -103,8 +109,18 @@ def _extract_output_text(response: dict[str, Any]) -> str:
     raise ValueError("The AI response did not include text output")
 
 
-def _analyze_with_ai(payload: ImageActivityRequest) -> ImageActivityResponse:
+def _strict_schema() -> dict[str, Any]:
     schema = ImageActivityResponse.model_json_schema()
+    # The Responses API requires every object in a strict JSON schema to
+    # explicitly disallow unspecified properties.
+    schema["additionalProperties"] = False
+    for definition in schema.get("$defs", {}).values():
+        if definition.get("type") == "object":
+            definition["additionalProperties"] = False
+    return schema
+
+
+def _analyze_with_ai(payload: ImageActivityRequest) -> ImageActivityResponse:
     prompt = f"""
 Actúa como diseñador instruccional universitario experto en educación en línea, Blackboard Ultra,
 accesibilidad y evaluación auténtica. Analiza la imagen y crea una actividad completa en español de
@@ -115,8 +131,9 @@ Curso: {payload.course or 'No especificado'}
 Nivel: {payload.academic_level}
 Propósito del profesor: {payload.teacher_goal or 'Diseñar una actividad educativa a partir de la imagen'}
 
-La rúbrica debe sumar exactamente 100 puntos. Incluye términos de búsqueda específicos para localizar
-modelos 3D educativos eficientes en formato GLB/glTF o en Sketchfab. Devuelve únicamente JSON válido.
+La rúbrica debe sumar exactamente 100 puntos. Incluye tres términos de búsqueda específicos para localizar
+modelos 3D educativos eficientes en formato GLB/glTF o en Sketchfab. En el campo source escribe
+"multimodal-ai". Devuelve únicamente JSON válido que cumpla exactamente el esquema.
 """.strip()
     body = {
         "model": OPENAI_MODEL,
@@ -133,7 +150,7 @@ modelos 3D educativos eficientes en formato GLB/glTF o en Sketchfab. Devuelve ú
             "format": {
                 "type": "json_schema",
                 "name": "ucan_image_activity",
-                "schema": schema,
+                "schema": _strict_schema(),
                 "strict": True,
             }
         },
