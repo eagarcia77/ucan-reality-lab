@@ -19,13 +19,18 @@ from .cloud import masked_database_target, wait_for_database
 from .database import Base, DATABASE_URL, engine, get_db
 from .models import ProjectModel, UserModel
 
-APP_VERSION = "7.1.0-cloud-ready"
+APP_VERSION = "7.2.1-university-registration"
 REDIS_URL = os.getenv("REDIS_URL", "")
 JWT_SECRET = os.getenv("JWT_SECRET", "change-this-development-secret")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_MINUTES = int(os.getenv("ACCESS_TOKEN_MINUTES", "480"))
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@ucan.local").lower().strip()
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "ChangeMe123!")
+ALLOWED_EMAIL_DOMAINS = tuple(
+    domain.strip().lower().lstrip("@")
+    for domain in os.getenv("ALLOWED_EMAIL_DOMAINS", "sangerman.inter.edu,inter.edu").split(",")
+    if domain.strip()
+)
 
 password_hash = PasswordHash.recommended()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
@@ -71,6 +76,12 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=8, max_length=128)
 
 
+class RegistrationRequest(BaseModel):
+    email: EmailStr
+    full_name: str = Field(min_length=3, max_length=160)
+    password: str = Field(min_length=10, max_length=128)
+
+
 class UserCreate(BaseModel):
     email: EmailStr
     full_name: str = Field(min_length=3, max_length=160)
@@ -92,6 +103,12 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: User
+
+
+class RegistrationConfig(BaseModel):
+    enabled: bool = True
+    allowed_domains: list[str]
+    default_role: str = "professor"
 
 
 class ProjectCreate(BaseModel):
@@ -125,6 +142,26 @@ class Project(BaseModel):
 
 def clean(value: str) -> str:
     return " ".join(value.split())
+
+
+def normalized_email(value: str) -> str:
+    return value.lower().strip()
+
+
+def email_domain(value: str) -> str:
+    return normalized_email(value).rsplit("@", 1)[-1]
+
+
+def require_university_email(value: str) -> str:
+    email = normalized_email(value)
+    domain = email_domain(email)
+    if domain not in ALLOWED_EMAIL_DOMAINS:
+        allowed = ", ".join(f"@{item}" for item in ALLOWED_EMAIL_DOMAINS)
+        raise HTTPException(
+            status_code=422,
+            detail=f"Utilice un correo electrónico institucional autorizado: {allowed}",
+        )
+    return email
 
 
 def create_access_token(user: UserModel) -> str:
@@ -192,14 +229,39 @@ def health(db: Session = Depends(get_db)) -> dict:
         "database_error": database_error,
         "redis_url_configured": bool(REDIS_URL),
         "port": int(os.getenv("PORT", "8000")),
+        "registration_enabled": True,
+        "allowed_email_domains": list(ALLOWED_EMAIL_DOMAINS),
         "phase": 1,
-        "increment": "cloud-ready",
+        "increment": "university-email-registration",
     }
+
+
+@app.get("/api/auth/registration-config", response_model=RegistrationConfig)
+def registration_config() -> RegistrationConfig:
+    return RegistrationConfig(allowed_domains=list(ALLOWED_EMAIL_DOMAINS))
+
+
+@app.post("/api/auth/register", response_model=TokenResponse, status_code=201)
+def register(payload: RegistrationRequest, db: Session = Depends(get_db)) -> TokenResponse:
+    email = require_university_email(str(payload.email))
+    if db.scalar(select(UserModel).where(UserModel.email == email)):
+        raise HTTPException(status_code=409, detail="Ya existe una cuenta con ese correo electrónico")
+    user = UserModel(
+        email=email,
+        full_name=clean(payload.full_name),
+        password_hash=password_hash.hash(payload.password),
+        role="professor",
+        is_active=True,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return TokenResponse(access_token=create_access_token(user), user=User.model_validate(user))
 
 
 @app.post("/api/auth/login", response_model=TokenResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
-    user = db.scalar(select(UserModel).where(UserModel.email == payload.email.lower().strip()))
+    user = db.scalar(select(UserModel).where(UserModel.email == normalized_email(str(payload.email))))
     if not user or not password_hash.verify(payload.password, user.password_hash) or not user.is_active:
         raise HTTPException(status_code=401, detail="Correo electrónico o contraseña incorrectos")
     return TokenResponse(access_token=create_access_token(user), user=User.model_validate(user))
@@ -217,7 +279,7 @@ def list_users(_: UserModel = Depends(require_roles("admin")), db: Session = Dep
 
 @app.post("/api/users", response_model=User, status_code=201)
 def create_user(payload: UserCreate, _: UserModel = Depends(require_roles("admin")), db: Session = Depends(get_db)) -> UserModel:
-    email = payload.email.lower().strip()
+    email = normalized_email(str(payload.email))
     if db.scalar(select(UserModel).where(UserModel.email == email)):
         raise HTTPException(status_code=409, detail="Ya existe un usuario con ese correo electrónico")
     user = UserModel(
