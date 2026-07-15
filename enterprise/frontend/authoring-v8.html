@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>UCAN Reality Lab v10.0 LTS</title>
+  <title>UCAN Reality Lab v10.1 LTS</title>
   <style>
     :root{font-family:Inter,system-ui,sans-serif;color:#14231e;background:#eef5f2;--g:#08775d;--dg:#073f32;--gold:#b78615;--red:#a52a2a}*{box-sizing:border-box}body{margin:0}header{background:linear-gradient(120deg,var(--dg),var(--g));color:#fff;padding:1rem 1.4rem;position:sticky;top:0;z-index:10}main{max-width:1240px;margin:auto;padding:1.2rem}.row{display:flex;justify-content:space-between;align-items:center;gap:.8rem;flex-wrap:wrap}.grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem}.card{background:#fff;border:1px solid #d5e4dd;border-radius:16px;padding:1.1rem;margin-bottom:1rem;box-shadow:0 8px 24px #0b3f3218}.steps{display:grid;grid-template-columns:repeat(5,1fr);gap:.7rem;margin-bottom:1rem}.step,.model-card,.publish-box{background:#fff;border-radius:12px;padding:.8rem;border:1px solid #d5e4dd}.step{font-weight:800}.step small{display:block;color:#52675f;font-weight:500}label{display:block;font-weight:750;margin-top:.8rem}input,textarea,select{width:100%;padding:.72rem;margin-top:.3rem;border:1px solid #9cb9ae;border-radius:10px;font:inherit}button,a.btn{display:inline-block;border:0;border-radius:10px;padding:.75rem 1rem;background:var(--g);color:#fff;font-weight:800;text-decoration:none;cursor:pointer;margin:.3rem .25rem .3rem 0}.secondary{background:#dfece7!important;color:#075e49!important}.gold{background:var(--gold)!important}.danger{background:var(--red)!important}.preview{min-height:180px;border:1px dashed #9cb9ae;border-radius:12px;padding:1rem;overflow:auto}.preview img,.preview iframe,.preview model-viewer{width:100%;max-height:520px;min-height:360px;border:0}.status{padding:.75rem;border-radius:10px;background:#eef7f3}.success{color:#08775d}.error{color:#a32323}.muted{color:#52675f}.rubric-row{display:grid;grid-template-columns:2fr 100px 3fr auto;gap:.5rem;margin:.5rem 0}.publish,.models{display:grid;grid-template-columns:repeat(3,1fr);gap:.8rem}.chip{display:inline-block;background:#e5f4ee;color:#075e49;border-radius:999px;padding:.25rem .55rem;margin:.15rem}.owner{background:#eef7f3;border-left:4px solid var(--g);padding:.6rem .8rem;border-radius:8px}.hidden{display:none!important}@media(max-width:850px){.grid,.steps,.publish,.models{grid-template-columns:1fr}.rubric-row{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
-<header><div class="row"><div><h1>UCAN Reality Lab v10.0 LTS</h1><div>Creación de actividades educativas y publicación para LMS</div></div><div><a class="btn secondary" href="/">Mis proyectos</a><button id="saveBtn">Guardar</button></div></div></header>
+<header><div class="row"><div><h1>UCAN Reality Lab v10.1 LTS</h1><div>Creación de actividades educativas y publicación para LMS</div></div><div><a class="btn secondary" href="/">Mis proyectos</a><button id="saveBtn">Guardar</button></div></div></header>
 <main id="main-content">
   <section class="steps"><div class="step">1. Recurso<small>Suba o describa.</small></div><div class="step">2. Actividad<small>Se crea automáticamente.</small></div><div class="step">3. Modelo 3D<small>Busque y seleccione.</small></div><div class="step">4. Evaluación<small>Revise la rúbrica.</small></div><div class="step">5. Publicar<small>Descargue para su LMS.</small></div></section>
   <section class="card"><div class="row"><div><h2 id="projectName">Proyecto</h2><p id="projectMeta" class="muted"></p><p id="projectOwner" class="owner"></p></div><span id="cloudState" class="chip">Preparando…</span></div></section>
@@ -19,8 +19,8 @@
   <section class="card"><h2>4. Rúbrica analítica</h2><div id="rubric"></div><button id="addCriterion" class="secondary">Añadir criterio</button><p id="rubricTotal"></p><h3>Vista del estudiante</h3><button id="previewBtn">Actualizar vista previa</button><div id="studentPreview" class="preview"></div></section>
   <section class="card"><h2>5. Publicar en su LMS</h2><div class="publish"><div class="publish-box"><h3>SCORM 1.2</h3><p>Recomendado para Blackboard Ultra.</p><button id="scorm12" class="gold">Descargar SCORM 1.2</button></div><div class="publish-box"><h3>SCORM 2004</h3><p>Para LMS compatibles.</p><button id="scorm2004">Descargar SCORM 2004</button></div><div class="publish-box"><h3>Paquete web</h3><p>HTML independiente y copia editable.</p><button id="webZip">Descargar ZIP web</button></div></div><p id="publishStatus"></p></section>
 </main>
-<script src="/logo-inter-1.js"></script><script src="/logo-inter-2.js"></script><script src="/logo-ucan-1.js"></script><script src="/logo-ucan-2.js"></script><script src="/institutional-shell.js?v=10000"></script>
+<script src="/logo-inter-1.js"></script><script src="/logo-inter-2.js"></script><script src="/logo-ucan-1.js"></script><script src="/logo-ucan-2.js"></script><script src="/institutional-shell.js?v=10100"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
-<script src="/authoring-v9.js?v=10000" defer></script>
+<script src="/authoring-v9.js?v=10100" defer></script>
 </body></html>
