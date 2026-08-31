@@ -1,6 +1,6 @@
 (()=>{
 'use strict';
-const VERSION='11.0 Standalone';
+const VERSION='11.1 Standalone';
 const $=(s,r=document)=>r.querySelector(s);
 function applyTheme(theme){document.documentElement.dataset.theme=theme;localStorage.setItem('ucan_theme',theme);const b=$('#ucanThemeToggle');if(b){b.textContent=theme==='dark'?'☀️ Modo claro':'🌙 Modo oscuro';b.setAttribute('aria-pressed',String(theme==='dark'));}}
 function installStyles(){if($('#ucanInstitutionalStyles'))return;const s=document.createElement('style');s.id='ucanInstitutionalStyles';s.textContent=`
