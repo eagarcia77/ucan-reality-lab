@@ -6,11 +6,8 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
-
-from .main import current_user
-from .models import UserModel
 
 router = APIRouter(prefix="/api/ai", tags=["AI Authoring"])
 
@@ -20,7 +17,6 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini").strip()
 
 class ImageActivityRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     image_url: str = Field(min_length=10, max_length=8_000_000)
     project_title: str = Field(default="Actividad educativa", max_length=160)
     course: str = Field(default="", max_length=120)
@@ -31,7 +27,6 @@ class ImageActivityRequest(BaseModel):
 
 class RubricCriterion(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     name: str
     points: int
     levels: str
@@ -39,7 +34,6 @@ class RubricCriterion(BaseModel):
 
 class ImageActivityResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     image_summary: str
     detected_concepts: list[str]
     activity_title: str
@@ -58,37 +52,24 @@ class ImageActivityResponse(BaseModel):
 def _fallback(payload: ImageActivityRequest) -> ImageActivityResponse:
     topic = payload.teacher_goal.strip() or payload.project_title.strip() or "la imagen presentada"
     return ImageActivityResponse(
-        image_summary=(
-            "La imagen fue incorporada correctamente. Para obtener una interpretación visual detallada, "
-            "configure OPENAI_API_KEY en el backend. Mientras tanto, se creó un diseño educativo editable "
-            "a partir del título, curso y propósito indicado por el profesor."
-        ),
+        image_summary="La imagen fue incorporada correctamente. La actividad se generó localmente; configure OPENAI_API_KEY para análisis visual detallado.",
         detected_concepts=[topic, "observación", "análisis visual", "aplicación"],
         activity_title=f"Análisis visual aplicado: {topic[:90]}",
         bloom_level="Analizar",
-        objectives=(
-            f"1. Identificar los elementos principales relacionados con {topic}.\n"
-            "2. Explicar las relaciones observables entre los componentes de la imagen.\n"
-            "3. Aplicar los conceptos del curso mediante evidencia visual.\n"
-            "4. Comunicar conclusiones con vocabulario disciplinar y claridad."
-        ),
-        instructions=(
-            "Observe cuidadosamente la imagen y examine sus elementos, organización, relaciones y detalles. "
-            "Identifique evidencia visual relevante, conecte sus observaciones con el contenido del curso y "
-            "prepare una respuesta fundamentada. Utilice la rúbrica para revisar su trabajo antes de entregarlo."
-        ),
+        objectives=(f"1. Identificar los elementos principales relacionados con {topic}.\n"
+                    "2. Explicar las relaciones observables entre los componentes.\n"
+                    "3. Aplicar conceptos del curso mediante evidencia visual.\n"
+                    "4. Comunicar conclusiones claras y fundamentadas."),
+        instructions="Observe cuidadosamente el recurso, identifique sus elementos principales, documente evidencia visible y relacione sus observaciones con el contenido del curso. Responda la pregunta central y revise la rúbrica antes de entregar.",
         main_question=f"¿Qué elementos principales se observan y cómo se relacionan con {topic}? Sustente su explicación con evidencia de la imagen.",
-        expected_answer=(
-            "La respuesta debe identificar elementos verificables de la imagen, explicar sus relaciones, "
-            "aplicar conceptos del curso, utilizar evidencia y presentar una conclusión organizada."
-        ),
+        expected_answer="La respuesta debe identificar elementos verificables, explicar relaciones, aplicar conceptos del curso y presentar una conclusión organizada.",
         quiz=[
-            "Identifique tres elementos visibles y explique la función o importancia de cada uno.",
+            "Identifique tres elementos visibles y explique la importancia de cada uno.",
             "¿Qué relación existe entre los componentes observados?",
-            "¿Cómo aplicaría este análisis a una situación auténtica del curso?",
+            "¿Cómo aplicaría este análisis a una situación auténtica?",
         ],
         model_search_terms=[topic, f"{topic} 3D model", f"{topic} GLB"],
-        model_accessibility_description=f"Modelo tridimensional complementario relacionado con {topic}; describa sus partes, orientación y función educativa.",
+        model_accessibility_description=f"Modelo tridimensional complementario relacionado con {topic}.",
         rubric=[
             RubricCriterion(name="Identificación y dominio del contenido", points=25, levels="Excelente, competente, en desarrollo e insuficiente"),
             RubricCriterion(name="Análisis y uso de evidencia visual", points=30, levels="Excelente, competente, en desarrollo e insuficiente"),
@@ -111,8 +92,6 @@ def _extract_output_text(response: dict[str, Any]) -> str:
 
 def _strict_schema() -> dict[str, Any]:
     schema = ImageActivityResponse.model_json_schema()
-    # The Responses API requires every object in a strict JSON schema to
-    # explicitly disallow unspecified properties.
     schema["additionalProperties"] = False
     for definition in schema.get("$defs", {}).values():
         if definition.get("type") == "object":
@@ -132,36 +111,21 @@ Nivel: {payload.academic_level}
 Propósito del profesor: {payload.teacher_goal or 'Diseñar una actividad educativa a partir de la imagen'}
 
 La rúbrica debe sumar exactamente 100 puntos. Incluye tres términos de búsqueda específicos para localizar
-modelos 3D educativos eficientes en formato GLB/glTF o en Sketchfab. En el campo source escribe
-"multimodal-ai". Devuelve únicamente JSON válido que cumpla exactamente el esquema.
+modelos 3D educativos eficientes en formato GLB/glTF o en Sketchfab. En source escribe "multimodal-ai".
+Devuelve únicamente JSON válido que cumpla exactamente el esquema.
 """.strip()
     body = {
         "model": OPENAI_MODEL,
-        "input": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "input_text", "text": prompt},
-                    {"type": "input_image", "image_url": payload.image_url},
-                ],
-            }
-        ],
-        "text": {
-            "format": {
-                "type": "json_schema",
-                "name": "ucan_image_activity",
-                "schema": _strict_schema(),
-                "strict": True,
-            }
-        },
+        "input": [{"role": "user", "content": [
+            {"type": "input_text", "text": prompt},
+            {"type": "input_image", "image_url": payload.image_url},
+        ]}],
+        "text": {"format": {"type": "json_schema", "name": "ucan_image_activity", "schema": _strict_schema(), "strict": True}},
     }
     request = urllib.request.Request(
         "https://api.openai.com/v1/responses",
         data=json.dumps(body).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "Content-Type": "application/json",
-        },
+        headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
         method="POST",
     )
     try:
@@ -180,10 +144,7 @@ modelos 3D educativos eficientes en formato GLB/glTF o en Sketchfab. En el campo
 
 
 @router.post("/design-from-image", response_model=ImageActivityResponse)
-def design_from_image(
-    payload: ImageActivityRequest,
-    _: UserModel = Depends(current_user),
-) -> ImageActivityResponse:
+def design_from_image(payload: ImageActivityRequest) -> ImageActivityResponse:
     if not payload.image_url.startswith(("https://", "data:image/")):
         raise HTTPException(status_code=422, detail="Use una URL HTTPS o suba una imagen válida")
     if not OPENAI_API_KEY:
