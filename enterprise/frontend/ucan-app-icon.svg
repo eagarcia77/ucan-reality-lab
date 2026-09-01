@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="UCAN Reality Lab">
+  <rect width="512" height="512" rx="96" fill="#08775d"/>
+  <circle cx="256" cy="256" r="188" fill="#073f32" stroke="#fed141" stroke-width="22"/>
+  <path d="M140 205 256 150l116 55-116 55-116-55Zm36 40v83l80 39 80-39v-83l-80 38-80-38Z" fill="#fed141"/>
+  <text x="256" y="430" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="72" font-weight="700" fill="#fff">UCAN</text>
+</svg>
