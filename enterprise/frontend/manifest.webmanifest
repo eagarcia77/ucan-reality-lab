@@ -1,0 +1,22 @@
+{
+  "name": "UCAN Reality Lab",
+  "short_name": "UCAN Reality Lab",
+  "description": "Creación local de actividades educativas, modelos 3D y paquetes para LMS sin login ni base de datos.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#eef5f2",
+  "theme_color": "#08775d",
+  "lang": "es-PR",
+  "orientation": "any",
+  "categories": ["education", "productivity"],
+  "icons": [
+    {
+      "src": "/ucan-app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
